@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+dist/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# DB (local data — never commit)
+~/.signalforge/
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# Docs / planning (local only)
+docs/
+
+# Markdown files (except README.md)
+*.md
+!README.md
+
+# Claude memory / session files
+.claude/

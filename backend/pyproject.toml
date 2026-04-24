@@ -1,0 +1,16 @@
+[tool.uv]
+package = false
+
+[project]
+name = "signalforge"
+version = "0.1.0"
+description = "Offline-first engineering work OS — transforms raw daily work into structured impact evidence"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.2",
+    "sqlmodel>=0.0.38",
+    "uvicorn[standard]>=0.46.0",
+]
