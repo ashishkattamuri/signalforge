@@ -11,6 +11,8 @@ export interface Week {
   week_start: string
   mode: WeekMode | null
   notes: string | null
+  focus_quote: string | null
+  target_level: string | null
 }
 
 export interface Priority {
@@ -27,6 +29,8 @@ export interface StaffDimension {
   dimension: number
   evidence: string | null
   gap: string | null
+  rating: number | null
+  current_level: string | null
 }
 
 export interface DailyEntry {
@@ -50,4 +54,36 @@ export interface WeeklySynthesis {
   what_landed: string | null
   what_drifted: string | null
   evidence_bullets: string | null
+}
+
+export interface EvidenceBullet {
+  id: number
+  week_id: number
+  week_start: string
+  text: string
+  starred: boolean
+}
+
+export interface AlignmentStats {
+  total_entries: number
+  total_mins: number
+  unplanned_pct: number
+  unplanned_mins: number
+  focus_score: number | null
+  plan_score: number
+  overall_score: number
+  by_signal_mins: Record<string, number>
+  by_status_count: Record<string, number>
+}
+
+export interface WeekTrend {
+  week_id: number
+  week_start: string
+  mode: WeekMode | null
+  total_entries: number
+  total_hrs: number
+  unplanned_pct: number
+  enriched_pct: number
+  complete_pct: number
+  top_signal: SignalType | null
 }

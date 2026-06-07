@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from .database import init_db, get_session
 from .models import (
     Week, WeekMode, Priority, StaffDimension, DailyEntry, WeeklySynthesis,
-    LLMPromptLog, PriorityLevel, PriorityCategory, DayOfWeek,
+    EvidenceBullet, LLMPromptLog, PriorityLevel, PriorityCategory, DayOfWeek,
     EntryStatus, EntrySource, SignalType,
 )
 from .llm_client import (
@@ -64,6 +64,16 @@ def _split_synthesis(text: str) -> tuple[str, str]:
     return text.strip(), ""
 
 
+def _parse_bullets(text: str) -> list[str]:
+    """Parse numbered list from LLM output into individual bullet strings."""
+    bullets = re.findall(r'^\d+[.)]\s*(.+?)(?=\n\d+[.)]|\Z)', text.strip(), re.MULTILINE | re.DOTALL)
+    if bullets:
+        return [b.strip() for b in bullets if b.strip()]
+    # Fallback: split by newlines, strip bullet markers
+    lines = [re.sub(r'^[•\-*]\s*', '', l).strip() for l in text.strip().split('\n') if l.strip()]
+    return [l for l in lines if len(l) > 20]
+
+
 def _enrich_entry_bg(entry_id: int) -> None:
     """Run LLM enrichment for a saved entry in a background thread."""
     with Session(_engine) as session:
@@ -106,7 +116,11 @@ app = FastAPI(title="SignalForge API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",   # Vite dev server
+        "tauri://localhost",        # Tauri production webview
+        "http://tauri.localhost",   # Tauri on some platforms
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -150,6 +164,8 @@ def get_week(week_id: int, session: Session = Depends(get_session)):
 class WeekUpdate(BaseModel):
     mode: Optional[WeekMode] = None
     notes: Optional[str] = None
+    focus_quote: Optional[str] = None
+    target_level: Optional[str] = None
 
 
 @app.patch("/api/weeks/{week_id}")
@@ -157,6 +173,8 @@ def update_week(week_id: int, body: WeekUpdate, session: Session = Depends(get_s
     week = session.get(Week, week_id)
     if not week:
         raise HTTPException(404, "Week not found")
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(week, field, value)
     if body.mode is not None:
         week.mode = body.mode
     if body.notes is not None:
@@ -223,6 +241,8 @@ class DimensionUpsert(BaseModel):
     dimension: int
     evidence: Optional[str] = None
     gap: Optional[str] = None
+    rating: Optional[int] = None
+    current_level: Optional[str] = None
 
 
 @app.put("/api/weeks/{week_id}/dimensions/{dim_number}")
@@ -235,12 +255,13 @@ def upsert_dimension(
         .where(StaffDimension.week_id == week_id, StaffDimension.dimension == dim_number)
     ).first()
     if existing:
-        existing.evidence = body.evidence
-        existing.gap = body.gap
+        for field, value in body.model_dump(exclude={'dimension'}, exclude_none=True).items():
+            setattr(existing, field, value)
         session.add(existing)
     else:
         existing = StaffDimension(week_id=week_id, dimension=dim_number,
-                                  evidence=body.evidence, gap=body.gap)
+                                  evidence=body.evidence, gap=body.gap,
+                                  rating=body.rating, current_level=body.current_level)
         session.add(existing)
     session.commit()
     session.refresh(existing)
@@ -353,6 +374,8 @@ def generate_synthesis(week_id: int, session: Session = Depends(get_session)):
 
     what_landed, what_drifted = _split_synthesis(synthesis_text)
 
+    week = session.get(Week, week_id)
+
     existing = session.exec(select(WeeklySynthesis).where(WeeklySynthesis.week_id == week_id)).first()
     if existing:
         existing.what_landed = what_landed
@@ -366,6 +389,14 @@ def generate_synthesis(week_id: int, session: Session = Depends(get_session)):
             what_drifted=what_drifted,
             evidence_bullets=bullets_text,
         ))
+
+    # Replace structured bullets for this week
+    old_bullets = session.exec(select(EvidenceBullet).where(EvidenceBullet.week_id == week_id)).all()
+    for b in old_bullets:
+        session.delete(b)
+    for text in _parse_bullets(bullets_text):
+        session.add(EvidenceBullet(week_id=week_id, week_start=week.week_start, text=text))
+
     session.commit()
 
     return {"what_landed": what_landed, "what_drifted": what_drifted, "evidence_bullets": bullets_text}
@@ -425,3 +456,149 @@ def export_week(week_id: int, session: Session = Depends(get_session)):
             lines += ["**Evidence Bank**", synthesis.evidence_bullets, ""]
 
     return {"markdown": "\n".join(lines), "week_start": str(week.week_start)}
+
+
+# ── Week list & navigation ────────────────────────────────────────────────────
+
+@app.get("/api/weeks")
+def list_weeks(session: Session = Depends(get_session)):
+    weeks = session.exec(select(Week).order_by(Week.week_start.desc())).all()  # type: ignore[attr-defined]
+    return weeks
+
+
+@app.get("/api/weeks/by-date/{iso_date}")
+def get_or_create_week_by_date(iso_date: str, session: Session = Depends(get_session)):
+    """Return the week containing iso_date, creating it if needed."""
+    try:
+        d = date.fromisoformat(iso_date)
+    except ValueError:
+        raise HTTPException(400, "Invalid date format, use YYYY-MM-DD")
+    start = d - timedelta(days=d.weekday())
+    week = session.exec(select(Week).where(Week.week_start == start)).first()
+    if not week:
+        week = Week(week_start=start)
+        session.add(week)
+        session.commit()
+        session.refresh(week)
+    return week
+
+
+# ── Alignment scoring ─────────────────────────────────────────────────────────
+
+@app.get("/api/weeks/{week_id}/alignment")
+def get_alignment(week_id: int, session: Session = Depends(get_session)):
+    entries = session.exec(select(DailyEntry).where(DailyEntry.week_id == week_id)).all()
+
+    total = len(entries)
+    total_mins = sum(e.estimate_mins or 0 for e in entries)
+    unplanned = [e for e in entries if e.unplanned]
+    unplanned_mins = sum(e.estimate_mins or 0 for e in unplanned)
+    unplanned_pct = round(unplanned_mins / total_mins * 100) if total_mins else 0
+
+    important = [e for e in entries if e.important]
+    important_complete = [e for e in important if e.status == EntryStatus.complete]
+    focus_score = round(len(important_complete) / len(important) * 100) if important else None
+
+    plan_score = 100 - unplanned_pct
+    overall = round(focus_score * 0.6 + plan_score * 0.4) if focus_score is not None else plan_score
+
+    by_signal: dict[str, int] = {}
+    for e in entries:
+        if e.signal_type:
+            by_signal[e.signal_type.value] = by_signal.get(e.signal_type.value, 0) + (e.estimate_mins or 0)
+
+    by_status: dict[str, int] = {}
+    for e in entries:
+        by_status[e.status.value] = by_status.get(e.status.value, 0) + 1
+
+    return {
+        "total_entries": total,
+        "total_mins": total_mins,
+        "unplanned_pct": unplanned_pct,
+        "unplanned_mins": unplanned_mins,
+        "focus_score": focus_score,
+        "plan_score": plan_score,
+        "overall_score": overall,
+        "by_signal_mins": by_signal,
+        "by_status_count": by_status,
+    }
+
+
+# ── Evidence bank ─────────────────────────────────────────────────────────────
+
+@app.get("/api/evidence-bank")
+def get_evidence_bank(starred_only: bool = False, session: Session = Depends(get_session)):
+    q = select(EvidenceBullet).order_by(EvidenceBullet.week_start.desc())  # type: ignore[attr-defined]
+    if starred_only:
+        q = q.where(EvidenceBullet.starred == True)  # noqa: E712
+    return session.exec(q).all()
+
+
+@app.patch("/api/evidence-bank/{bullet_id}/star")
+def toggle_star(bullet_id: int, session: Session = Depends(get_session)):
+    b = session.get(EvidenceBullet, bullet_id)
+    if not b:
+        raise HTTPException(404, "Bullet not found")
+    b.starred = not b.starred
+    session.add(b)
+    session.commit()
+    session.refresh(b)
+    return b
+
+
+# ── Promotion packet export ───────────────────────────────────────────────────
+
+@app.get("/api/promotion-packet")
+def export_promotion_packet(session: Session = Depends(get_session)):
+    bullets = session.exec(
+        select(EvidenceBullet)
+        .where(EvidenceBullet.starred == True)  # noqa: E712
+        .order_by(EvidenceBullet.week_start.desc())  # type: ignore[attr-defined]
+    ).all()
+
+    if not bullets:
+        return {"markdown": "# Promotion Packet\n\n_No starred bullets yet. Star bullets in the Evidence Bank to build your packet._", "count": 0}
+
+    lines = ["# Promotion Packet — SignalForge", ""]
+    current_week = None
+    for b in bullets:
+        if b.week_start != current_week:
+            current_week = b.week_start
+            lines += [f"## Week of {current_week}", ""]
+        lines.append(f"- {b.text}")
+    lines.append("")
+
+    return {"markdown": "\n".join(lines), "count": len(bullets)}
+
+
+# ── Trends ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/trends")
+def get_trends(session: Session = Depends(get_session)):
+    weeks = session.exec(select(Week).order_by(Week.week_start.desc())).all()  # type: ignore[attr-defined]
+    result = []
+    for w in weeks:
+        entries = session.exec(select(DailyEntry).where(DailyEntry.week_id == w.id)).all()
+        if not entries:
+            continue
+        total_mins = sum(e.estimate_mins or 0 for e in entries)
+        unplanned_mins = sum(e.estimate_mins or 0 for e in entries if e.unplanned)
+        enriched = sum(1 for e in entries if e.enriched_task)
+        complete = sum(1 for e in entries if e.status == EntryStatus.complete)
+        signal_counts: dict[str, int] = {}
+        for e in entries:
+            if e.signal_type:
+                signal_counts[e.signal_type.value] = signal_counts.get(e.signal_type.value, 0) + 1
+        top_signal = max(signal_counts, key=signal_counts.get) if signal_counts else None  # type: ignore[arg-type]
+        result.append({
+            "week_id": w.id,
+            "week_start": str(w.week_start),
+            "mode": w.mode.value if w.mode else None,
+            "total_entries": len(entries),
+            "total_hrs": round(total_mins / 60, 1),
+            "unplanned_pct": round(unplanned_mins / total_mins * 100) if total_mins else 0,
+            "enriched_pct": round(enriched / len(entries) * 100),
+            "complete_pct": round(complete / len(entries) * 100),
+            "top_signal": top_signal,
+        })
+    return result

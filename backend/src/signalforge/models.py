@@ -62,6 +62,8 @@ class Week(SQLModel, table=True):
     week_start: date = Field(index=True)
     mode: Optional[WeekMode] = None
     notes: Optional[str] = None
+    focus_quote: Optional[str] = None   # editable week focus statement
+    target_level: Optional[str] = None  # e.g. "Staff"
 
 
 class Priority(SQLModel, table=True):
@@ -78,6 +80,8 @@ class StaffDimension(SQLModel, table=True):
     dimension: int = Field(ge=1, le=8)
     evidence: Optional[str] = None
     gap: Optional[str] = None
+    rating: Optional[int] = Field(default=None, ge=1, le=5)  # 1–5 dot indicators
+    current_level: Optional[str] = None  # e.g. "Senior"
 
 
 class DailyEntry(SQLModel, table=True):
@@ -101,7 +105,15 @@ class WeeklySynthesis(SQLModel, table=True):
     week_id: int = Field(foreign_key="week.id", unique=True)
     what_landed: Optional[str] = None
     what_drifted: Optional[str] = None
-    evidence_bullets: Optional[str] = None  # JSON array stored as string
+    evidence_bullets: Optional[str] = None  # raw LLM text kept for reference
+
+
+class EvidenceBullet(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    week_id: int = Field(foreign_key="week.id", index=True)
+    week_start: date  # denormalized for fast cross-week queries
+    text: str
+    starred: bool = False
 
 
 class LLMPromptLog(SQLModel, table=True):

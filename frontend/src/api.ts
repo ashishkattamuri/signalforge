@@ -3,7 +3,9 @@ import type {
   PriorityLevel, PriorityCategory, DayOfWeek, EntrySource, EntryStatus,
 } from './types'
 
-const BASE = '/api'
+// In Tauri there is no proxy — use absolute URL. In Vite dev, relative URL is proxied.
+const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+const BASE = IS_TAURI ? 'http://localhost:8000/api' : '/api'
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
@@ -34,7 +36,7 @@ export const deletePriority = (id: number) =>
 // Staff Dimensions
 export const getDimensions = (weekId: number) =>
   req<StaffDimension[]>(`/weeks/${weekId}/dimensions`)
-export const upsertDimension = (weekId: number, dim: number, body: { dimension: number; evidence?: string; gap?: string }) =>
+export const upsertDimension = (weekId: number, dim: number, body: { dimension: number; evidence?: string; gap?: string; rating?: number; current_level?: string }) =>
   req<StaffDimension>(`/weeks/${weekId}/dimensions/${dim}`, { method: 'PUT', body: JSON.stringify(body) })
 
 // Daily Entries
@@ -58,6 +60,28 @@ export const generateSynthesis = (weekId: number) =>
 // Export
 export const exportWeek = (weekId: number) =>
   req<{ markdown: string; week_start: string }>(`/weeks/${weekId}/export`)
+
+// Week list & navigation
+export const listWeeks = () => req<Week[]>('/weeks')
+export const getWeekByDate = (isoDate: string) => req<Week>(`/weeks/by-date/${isoDate}`)
+
+// Alignment
+export const getAlignment = (weekId: number) =>
+  req<import('./types').AlignmentStats>(`/weeks/${weekId}/alignment`)
+
+// Evidence bank
+export const getEvidenceBank = (starredOnly = false) =>
+  req<import('./types').EvidenceBullet[]>(`/evidence-bank${starredOnly ? '?starred_only=true' : ''}`)
+export const toggleStar = (bulletId: number) =>
+  req<import('./types').EvidenceBullet>(`/evidence-bank/${bulletId}/star`, { method: 'PATCH' })
+
+// Promotion packet
+export const getPromotionPacket = () =>
+  req<{ markdown: string; count: number }>('/promotion-packet')
+
+// Trends
+export const getTrends = () =>
+  req<import('./types').WeekTrend[]>('/trends')
 
 // Health
 export const getHealth = () =>

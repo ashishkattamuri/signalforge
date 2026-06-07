@@ -14,3 +14,8 @@ dependencies = [
     "sqlmodel>=0.0.38",
     "uvicorn[standard]>=0.46.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.20.0",
+]
