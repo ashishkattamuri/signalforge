@@ -76,6 +76,16 @@ export interface AlignmentStats {
   by_status_count: Record<string, number>
 }
 
+export interface AppSettings {
+  id: number
+  onboarded: boolean
+  selected_model: string
+  profile_name: string | null
+  current_level: string | null
+  target_level: string | null
+  org_context: string | null
+}
+
 export interface WeekTrend {
   week_id: number
   week_start: string

@@ -86,3 +86,9 @@ export const getTrends = () =>
 // Health
 export const getHealth = () =>
   req<{ status: string; llm_available: boolean }>('/health')
+
+// App settings
+export const getSettings = () =>
+  req<import('./types').AppSettings>('/settings')
+export const updateSettings = (body: Partial<import('./types').AppSettings>) =>
+  req<import('./types').AppSettings>('/settings', { method: 'PATCH', body: JSON.stringify(body) })

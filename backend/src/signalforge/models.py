@@ -124,3 +124,13 @@ class LLMPromptLog(SQLModel, table=True):
     prompt_text: str
     response_text: str
     model: str
+
+
+class AppSettings(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    onboarded: bool = False
+    selected_model: str = "llama3.1:8b"
+    profile_name: Optional[str] = None
+    current_level: Optional[str] = None
+    target_level: Optional[str] = None
+    org_context: Optional[str] = None

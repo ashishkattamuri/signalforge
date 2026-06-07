@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import type { Week, Priority, StaffDimension, DailyEntry, WeeklySynthesis } from './types'
 import {
   getCurrentWeek, getPriorities, getDimensions, getEntries, getSynthesis, listWeeks,
+  getSettings, updateSettings,
 } from './api'
 import { WeekHeader } from './components/WeekHeader'
 import { StaffDimensionsPanel } from './components/StaffDimensionsPanel'
@@ -12,6 +13,8 @@ import { WeeklySynthesisPanel } from './components/WeeklySynthesisPanel'
 import { EvidenceBankPanel } from './components/EvidenceBankPanel'
 import { TrendsPanel } from './components/TrendsPanel'
 import { StartupScreen } from './components/StartupScreen'
+import { Onboarding } from './components/Onboarding'
+import type { Profile } from './components/Onboarding'
 
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 const HEALTH_URL = 'http://localhost:8000/api/health'
@@ -52,6 +55,7 @@ export default function App() {
   const [startup, setStartup] = useState<StartupEvent | null>(
     IS_TAURI ? { stage: 'starting_backend', message: 'Starting SignalForge backend…', progress: null } : null
   )
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
   async function loadWeekData(w: Week) {
     const [p, d, e, s] = await Promise.all([
@@ -68,16 +72,29 @@ export default function App() {
 
   async function init() {
     try {
-      const [w, weeks] = await Promise.all([getCurrentWeek(), listWeeks()])
+      const [w, weeks, settings] = await Promise.all([getCurrentWeek(), listWeeks(), getSettings()])
       const merged = weeks.find(x => x.id === w.id) ? weeks : [w, ...weeks]
       setAllWeeks(merged)
       setWeek(w)
       await loadWeekData(w)
+      if (!settings.onboarded) setShowOnboarding(true)
     } catch {
       setError('Cannot reach SignalForge backend. Make sure the server is running on port 8000.')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleOnboardingComplete(profile: Profile, model: string) {
+    await updateSettings({
+      onboarded: true,
+      selected_model: model,
+      profile_name: profile.name || undefined,
+      current_level: profile.currentLevel || undefined,
+      target_level: profile.targetLevel || undefined,
+      org_context: profile.orgContext || undefined,
+    })
+    setShowOnboarding(false)
   }
 
   useEffect(() => {
@@ -128,6 +145,10 @@ export default function App() {
     return <StartupScreen event={startup} />
   }
 
+  if (showOnboarding) {
+    return <Onboarding onComplete={handleOnboardingComplete} />
+  }
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-50">
@@ -168,6 +189,7 @@ export default function App() {
           enrichedCount={enrichedCount}
           onWeekUpdated={setWeek}
           onWeekChange={handleWeekChange}
+          onOpenSettings={() => setShowOnboarding(true)}
         />
         <StaffDimensionsPanel
           week={week}

@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from .database import init_db, get_session
 from .models import (
     Week, WeekMode, Priority, StaffDimension, DailyEntry, WeeklySynthesis,
-    EvidenceBullet, LLMPromptLog, PriorityLevel, PriorityCategory, DayOfWeek,
+    EvidenceBullet, LLMPromptLog, AppSettings, PriorityLevel, PriorityCategory, DayOfWeek,
     EntryStatus, EntrySource, SignalType,
 )
 from .llm_client import (
@@ -133,6 +133,43 @@ llm = LLMClient()
 @app.get("/api/health")
 def health():
     return {"status": "ok", "llm_available": llm.is_available()}
+
+
+# ── App Settings ─────────────────────────────────────────────────────────────
+
+class SettingsUpdate(BaseModel):
+    onboarded: Optional[bool] = None
+    selected_model: Optional[str] = None
+    profile_name: Optional[str] = None
+    current_level: Optional[str] = None
+    target_level: Optional[str] = None
+    org_context: Optional[str] = None
+
+
+def _get_or_create_settings(session: Session) -> AppSettings:
+    settings = session.exec(select(AppSettings)).first()
+    if not settings:
+        settings = AppSettings()
+        session.add(settings)
+        session.commit()
+        session.refresh(settings)
+    return settings
+
+
+@app.get("/api/settings")
+def get_settings(session: Session = Depends(get_session)):
+    return _get_or_create_settings(session)
+
+
+@app.patch("/api/settings")
+def update_settings(body: SettingsUpdate, session: Session = Depends(get_session)):
+    settings = _get_or_create_settings(session)
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(settings, field, value)
+    session.add(settings)
+    session.commit()
+    session.refresh(settings)
+    return settings
 
 
 # ── Weeks ─────────────────────────────────────────────────────────────────────
