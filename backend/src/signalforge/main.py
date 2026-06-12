@@ -22,6 +22,7 @@ import json
 import re
 
 from .database import engine as _engine
+from .mcp_server import mcp
 
 
 def _split_synthesis(text: str) -> tuple[str, str]:
@@ -126,6 +127,10 @@ def _enrich_entry_bg(entry_id: int) -> None:
             pass
 
 
+# Built before app so the lifespan can run its session manager
+_mcp_app = mcp.streamable_http_app()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -133,10 +138,12 @@ async def lifespan(app: FastAPI):
         settings = session.exec(select(AppSettings)).first()
         if settings and settings.selected_model:
             llm.model = settings.selected_model
-    yield
+    async with mcp.session_manager.run():
+        yield
 
 
 app = FastAPI(title="SignalForge API", lifespan=lifespan)
+app.mount("/mcp", _mcp_app)
 
 app.add_middleware(
     CORSMiddleware,

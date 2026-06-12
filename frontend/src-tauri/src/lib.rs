@@ -66,6 +66,11 @@ pub fn run() {
         })
         .on_window_event(move |_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
+                // PACKAGING.md 3.5.5: kill backend always — the PyInstaller
+                // process outlives the Tauri shell and would hold port 8000
+                let _ = std::process::Command::new("pkill")
+                    .args(["-f", "signalforge-backend"])
+                    .output();
                 if ollama_owned_exit.lock().unwrap().0 {
                     let _ = std::process::Command::new("pkill")
                         .args(["-f", "ollama serve"])

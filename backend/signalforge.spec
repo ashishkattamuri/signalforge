@@ -43,7 +43,10 @@ a = Analysis(
         'multiprocessing.util',
         'email.mime.multipart',
         'email.mime.text',
-    ] + collect_submodules('fastapi') + collect_submodules('starlette'),
+    ] + collect_submodules('fastapi') + collect_submodules('starlette')
+      + collect_submodules('mcp', filter=lambda name: not name.startswith('mcp.cli'))
+      + collect_submodules('pydantic')
+      + collect_submodules('sse_starlette'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
