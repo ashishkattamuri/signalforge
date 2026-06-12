@@ -86,6 +86,29 @@ export interface AppSettings {
   org_context: string | null
 }
 
+export type ConnectionKind = 'mcp_http' | 'mcp_sse' | 'mcp_stdio'
+
+export interface Connection {
+  id: number
+  name: string
+  kind: ConnectionKind
+  description: string | null
+  url: string | null
+  headers: string | null
+  command: string | null
+  args: string | null
+  env: string | null
+  enabled: boolean
+  oauth_tokens: string | null
+}
+
+export interface ConnectionTestResult {
+  ok: boolean
+  tool_count?: number
+  tools?: string[]
+  error?: string
+}
+
 export interface WeekTrend {
   week_id: number
   week_start: string

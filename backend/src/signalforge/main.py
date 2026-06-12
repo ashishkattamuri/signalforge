@@ -8,9 +8,11 @@ from sqlmodel import Session, select
 from .database import init_db, get_session
 from .models import (
     Week, WeekMode, Priority, StaffDimension, DailyEntry, WeeklySynthesis,
-    EvidenceBullet, LLMPromptLog, AppSettings, PriorityLevel, PriorityCategory, DayOfWeek,
+    EvidenceBullet, LLMPromptLog, AppSettings, Connection, ConnectionKind,
+    PriorityLevel, PriorityCategory, DayOfWeek,
     EntryStatus, EntrySource, SignalType,
 )
+from . import connections as conn_layer
 from .llm_client import (
     LLMClient, build_prompt,
     IMPACT_EXTRACTION, SIGNAL_CLASSIFICATION, REFLECTION_COACH,
@@ -203,6 +205,166 @@ def update_settings(body: SettingsUpdate, session: Session = Depends(get_session
     if body.selected_model:
         llm.model = settings.selected_model
     return settings
+
+
+# ── Connections (agentic WorkOS) ─────────────────────────────────────────────
+
+class ConnectionCreate(BaseModel):
+    name: str
+    kind: ConnectionKind
+    description: Optional[str] = None
+    url: Optional[str] = None
+    headers: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[str] = None
+    env: Optional[str] = None
+    enabled: bool = True
+
+
+class ConnectionUpdate(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[ConnectionKind] = None
+    description: Optional[str] = None
+    url: Optional[str] = None
+    headers: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[str] = None
+    env: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@app.get("/api/connections")
+def list_connections(session: Session = Depends(get_session)):
+    return session.exec(select(Connection)).all()
+
+
+@app.post("/api/connections", status_code=201)
+def create_connection(body: ConnectionCreate, session: Session = Depends(get_session)):
+    if session.exec(select(Connection).where(Connection.name == body.name)).first():
+        raise HTTPException(409, f"Connection '{body.name}' already exists")
+    c = Connection(**body.model_dump())
+    session.add(c)
+    session.commit()
+    session.refresh(c)
+    return c
+
+
+@app.patch("/api/connections/{conn_id}")
+def update_connection(conn_id: int, body: ConnectionUpdate, session: Session = Depends(get_session)):
+    c = session.get(Connection, conn_id)
+    if not c:
+        raise HTTPException(404, "Connection not found")
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(c, field, value)
+    session.add(c)
+    session.commit()
+    session.refresh(c)
+    return c
+
+
+@app.delete("/api/connections/{conn_id}", status_code=204)
+def delete_connection(conn_id: int, session: Session = Depends(get_session)):
+    c = session.get(Connection, conn_id)
+    if not c:
+        raise HTTPException(404, "Connection not found")
+    session.delete(c)
+    session.commit()
+
+
+# ── OAuth sign-in for remote connections ────────────────────────────────────
+# One flow at a time (single-user local app). The flow task drives the MCP
+# SDK's OAuth client; the callback endpoint feeds it the authorization code.
+
+import asyncio as _asyncio
+import webbrowser as _webbrowser
+
+from fastapi.responses import HTMLResponse
+
+_oauth_flows: dict[int, dict] = {}
+
+
+@app.post("/api/connections/{conn_id}/authorize")
+async def authorize_connection(conn_id: int, session: Session = Depends(get_session)):
+    c = session.get(Connection, conn_id)
+    if not c:
+        raise HTTPException(404, "Connection not found")
+    if c.kind == ConnectionKind.mcp_stdio:
+        raise HTTPException(400, "OAuth sign-in applies to remote connections only")
+
+    flow: dict = {"auth_url": None, "status": "pending", "error": None,
+                  "future": _asyncio.get_event_loop().create_future()}
+    _oauth_flows[conn_id] = flow
+
+    async def redirect_handler(url: str) -> None:
+        flow["auth_url"] = url
+        _webbrowser.open(url)
+
+    async def callback_handler() -> tuple:
+        async with _asyncio.timeout(300):
+            return await flow["future"]
+
+    async def run_flow():
+        try:
+            provider = conn_layer.build_oauth_provider(c, redirect_handler, callback_handler)
+            tools = await conn_layer.list_tools(c, auth=provider, timeout_s=320)
+            flow["status"] = "success"
+            flow["tool_count"] = len(tools)
+        except Exception as e:
+            flow["status"] = "error"
+            flow["error"] = conn_layer.leaf_error(e)
+
+    _asyncio.create_task(run_flow())
+
+    # Wait briefly for the SDK to produce the authorization URL
+    for _ in range(80):
+        if flow["auth_url"] or flow["status"] == "error":
+            break
+        await _asyncio.sleep(0.1)
+
+    if flow["status"] == "error":
+        return {"ok": False, "error": flow["error"]}
+    if not flow["auth_url"]:
+        return {"ok": False, "error": "Server did not request authorization (it may not support OAuth)"}
+    return {"ok": True, "auth_url": flow["auth_url"]}
+
+
+@app.get("/api/connections/{conn_id}/authorize/status")
+def authorize_status(conn_id: int):
+    flow = _oauth_flows.get(conn_id)
+    if not flow:
+        return {"status": "none"}
+    return {"status": flow["status"], "error": flow["error"], "tool_count": flow.get("tool_count")}
+
+
+@app.get("/api/oauth/callback")
+async def oauth_callback(code: str = "", state: str = "", error: str = ""):
+    pending = next(
+        (f for f in _oauth_flows.values() if f["status"] == "pending" and not f["future"].done()),
+        None,
+    )
+    if pending:
+        if error:
+            pending["future"].set_exception(RuntimeError(f"Authorization denied: {error}"))
+        else:
+            pending["future"].set_result((code, state or None))
+    return HTMLResponse(
+        "<html><body style='font-family:-apple-system,sans-serif;display:flex;height:90vh;"
+        "align-items:center;justify-content:center'><div style='text-align:center'>"
+        "<h2>✓ SignalForge connected</h2><p>You can close this tab and return to the app.</p>"
+        "</div></body></html>"
+    )
+
+
+@app.post("/api/connections/{conn_id}/test")
+async def test_connection(conn_id: int, session: Session = Depends(get_session)):
+    c = session.get(Connection, conn_id)
+    if not c:
+        raise HTTPException(404, "Connection not found")
+    try:
+        tools = await conn_layer.list_tools(c)
+        return {"ok": True, "tool_count": len(tools), "tools": [t["name"] for t in tools]}
+    except Exception as e:
+        return {"ok": False, "error": conn_layer.leaf_error(e)}
 
 
 # ── Weeks ─────────────────────────────────────────────────────────────────────

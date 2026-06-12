@@ -92,3 +92,19 @@ export const getSettings = () =>
   req<import('./types').AppSettings>('/settings')
 export const updateSettings = (body: Partial<import('./types').AppSettings>) =>
   req<import('./types').AppSettings>('/settings', { method: 'PATCH', body: JSON.stringify(body) })
+
+// Connections (agentic WorkOS)
+export const getConnections = () =>
+  req<import('./types').Connection[]>('/connections')
+export const createConnection = (body: Partial<import('./types').Connection> & { name: string; kind: import('./types').ConnectionKind }) =>
+  req<import('./types').Connection>('/connections', { method: 'POST', body: JSON.stringify(body) })
+export const updateConnection = (id: number, body: Partial<import('./types').Connection>) =>
+  req<import('./types').Connection>(`/connections/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const deleteConnection = (id: number) =>
+  req<void>(`/connections/${id}`, { method: 'DELETE' })
+export const testConnection = (id: number) =>
+  req<import('./types').ConnectionTestResult>(`/connections/${id}/test`, { method: 'POST' })
+export const authorizeConnection = (id: number) =>
+  req<{ ok: boolean; auth_url?: string; error?: string }>(`/connections/${id}/authorize`, { method: 'POST' })
+export const authorizeStatus = (id: number) =>
+  req<{ status: 'none' | 'pending' | 'success' | 'error'; error?: string; tool_count?: number }>(`/connections/${id}/authorize/status`)

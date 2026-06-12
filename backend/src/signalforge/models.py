@@ -134,3 +134,24 @@ class AppSettings(SQLModel, table=True):
     current_level: Optional[str] = None
     target_level: Optional[str] = None
     org_context: Optional[str] = None
+
+
+class ConnectionKind(str, Enum):
+    mcp_http = "mcp_http"    # remote/local MCP server over streamable HTTP
+    mcp_sse = "mcp_sse"      # remote MCP server over SSE (legacy transport)
+    mcp_stdio = "mcp_stdio"  # MCP server spawned as a subprocess
+
+
+class Connection(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    kind: ConnectionKind
+    description: Optional[str] = None
+    url: Optional[str] = None          # mcp_http: server URL
+    headers: Optional[str] = None      # mcp_http: JSON dict (e.g. Authorization)
+    command: Optional[str] = None      # mcp_stdio: executable
+    args: Optional[str] = None         # mcp_stdio: JSON list
+    env: Optional[str] = None          # mcp_stdio: JSON dict (e.g. GITHUB_TOKEN)
+    enabled: bool = True
+    oauth_tokens: Optional[str] = None       # JSON OAuthToken — set after Sign in
+    oauth_client_info: Optional[str] = None  # JSON dynamic client registration info

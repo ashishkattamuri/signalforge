@@ -12,6 +12,9 @@ import { DailyGrid } from './components/DailyGrid'
 import { WeeklySynthesisPanel } from './components/WeeklySynthesisPanel'
 import { EvidenceBankPanel } from './components/EvidenceBankPanel'
 import { TrendsPanel } from './components/TrendsPanel'
+import { WorkOSView } from './components/WorkOSView'
+import { Sidebar } from './components/Sidebar'
+import type { AppView } from './components/Sidebar'
 import { StartupScreen } from './components/StartupScreen'
 import { Onboarding } from './components/Onboarding'
 import type { Profile } from './components/Onboarding'
@@ -56,6 +59,7 @@ export default function App() {
     IS_TAURI ? { stage: 'starting_backend', message: 'Starting SignalForge backend…', progress: null } : null
   )
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const [view, setView] = useState<AppView>('journal')
 
   async function loadWeekData(w: Week) {
     const [p, d, e, s] = await Promise.all([
@@ -178,44 +182,52 @@ export default function App() {
   const enrichedCount = entries.filter(e => e.enriched_task).length
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-screen-xl mx-auto">
-        <WeekHeader
-          week={week}
-          allWeeks={allWeeks}
-          entryCount={entries.length}
-          unplannedCount={unplannedCount}
-          totalMins={totalMins}
-          enrichedCount={enrichedCount}
-          onWeekUpdated={setWeek}
-          onWeekChange={handleWeekChange}
-          onOpenSettings={() => setShowOnboarding(true)}
-        />
-        <StaffDimensionsPanel
-          week={week}
-          dimensions={dimensions}
-          onUpdated={updateDimension}
-          onWeekUpdated={setWeek}
-        />
-        <PriorityContextPanel
-          weekId={week.id}
-          priorities={priorities}
-          onUpdated={setPriorities}
-        />
-        <AlignmentPanel weekId={week.id} />
-        <DailyGrid
-          weekId={week.id}
-          entries={entries}
-          onUpdated={setEntries}
-        />
-        <WeeklySynthesisPanel
-          weekId={week.id}
-          synthesis={synthesis}
-          onUpdated={setSynthesis}
-        />
-        <EvidenceBankPanel />
-        <TrendsPanel />
-      </div>
+    <div className="h-screen flex bg-gray-50 overflow-hidden">
+      <Sidebar view={view} onChange={setView} onOpenSettings={() => setShowOnboarding(true)} />
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-screen-xl mx-auto">
+          {view === 'journal' ? (
+            <>
+              <WeekHeader
+                week={week}
+                allWeeks={allWeeks}
+                entryCount={entries.length}
+                unplannedCount={unplannedCount}
+                totalMins={totalMins}
+                enrichedCount={enrichedCount}
+                onWeekUpdated={setWeek}
+                onWeekChange={handleWeekChange}
+              />
+              <StaffDimensionsPanel
+                week={week}
+                dimensions={dimensions}
+                onUpdated={updateDimension}
+                onWeekUpdated={setWeek}
+              />
+              <PriorityContextPanel
+                weekId={week.id}
+                priorities={priorities}
+                onUpdated={setPriorities}
+              />
+              <AlignmentPanel weekId={week.id} />
+              <DailyGrid
+                weekId={week.id}
+                entries={entries}
+                onUpdated={setEntries}
+              />
+              <WeeklySynthesisPanel
+                weekId={week.id}
+                synthesis={synthesis}
+                onUpdated={setSynthesis}
+              />
+              <EvidenceBankPanel />
+              <TrendsPanel />
+            </>
+          ) : (
+            <WorkOSView />
+          )}
+        </div>
+      </main>
     </div>
   )
 }

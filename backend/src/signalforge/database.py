@@ -13,6 +13,8 @@ _MIGRATIONS = [
     ("week", "target_level", "TEXT"),
     ("staffdimension", "rating", "INTEGER"),
     ("staffdimension", "current_level", "TEXT"),
+    ("connection", "oauth_tokens", "TEXT"),
+    ("connection", "oauth_client_info", "TEXT"),
 ]
 
 

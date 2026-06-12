@@ -12,9 +12,10 @@ from mcp.server.fastmcp import FastMCP
 
 from .database import engine
 from .models import (
-    Week, Priority, DailyEntry, WeeklySynthesis, AppSettings,
+    Week, Priority, DailyEntry, WeeklySynthesis, AppSettings, Connection,
     DayOfWeek, EntrySource, EntryStatus,
 )
+from . import connections as conn_layer
 
 mcp = FastMCP(
     "SignalForge",
@@ -180,6 +181,54 @@ def get_week_summary(week_start: Optional[str] = None) -> dict:
                 "what_drifted": synthesis.what_drifted,
             } if synthesis else None,
         }
+
+
+def _get_connection(name: str) -> Optional[Connection]:
+    with Session(engine) as session:
+        return session.exec(
+            select(Connection).where(Connection.name == name, Connection.enabled == True)  # noqa: E712
+        ).first()
+
+
+@mcp.tool()
+def list_connections() -> dict:
+    """List the user's connected work tools (JIRA, Grafana, PagerDuty, GitHub, …).
+    Use list_connection_tools to discover what each connection can do."""
+    with Session(engine) as session:
+        conns = session.exec(select(Connection)).all()
+        return {
+            "connections": [
+                {"name": c.name, "kind": c.kind.value, "description": c.description, "enabled": c.enabled}
+                for c in conns
+            ]
+        }
+
+
+@mcp.tool()
+async def list_connection_tools(connection: str) -> dict:
+    """Discover the tools a connected work tool exposes. Returns name,
+    description, and input schema for each tool."""
+    conn = _get_connection(connection)
+    if not conn:
+        return {"error": f"No enabled connection named '{connection}'. Use list_connections."}
+    try:
+        return {"connection": connection, "tools": await conn_layer.list_tools(conn)}
+    except Exception as e:
+        return {"error": f"Could not reach '{connection}': {conn_layer.leaf_error(e)}"}
+
+
+@mcp.tool()
+async def call_connection_tool(connection: str, tool: str, arguments: Optional[dict] = None) -> dict:
+    """Call a tool on a connected work tool — e.g. search JIRA issues, query
+    Grafana, list PagerDuty incidents. Use list_connection_tools first to see
+    available tools and their input schemas."""
+    conn = _get_connection(connection)
+    if not conn:
+        return {"error": f"No enabled connection named '{connection}'. Use list_connections."}
+    try:
+        return await conn_layer.call_tool(conn, tool, arguments or {})
+    except Exception as e:
+        return {"error": f"Tool call on '{connection}' failed: {conn_layer.leaf_error(e)}"}
 
 
 @mcp.tool()
