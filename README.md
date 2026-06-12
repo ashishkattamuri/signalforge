@@ -58,28 +58,63 @@ pnpm dev
 # App available at http://localhost:5173
 ```
 
+### macOS desktop app
+
+SignalForge also ships as a native macOS app (Tauri) with the backend and Ollama bundled as sidecars — double-click, no terminal. First launch includes an onboarding flow with a model picker (sizes shown upfront, downloaded once via Ollama).
+
+```bash
+./scripts/prepare-binaries.sh        # compile backend (PyInstaller) + stage Ollama
+cd frontend && pnpm tauri build      # → SignalForge.app + .dmg
+```
+
+## MCP server — connect your coding agent
+
+SignalForge exposes a local [MCP](https://modelcontextprotocol.io) server at `http://localhost:8000/mcp/`, so agents like **Claude Code** and **Windsurf** can push work into your week and read your priorities — nothing leaves your machine.
+
+```bash
+claude mcp add --transport http signalforge http://localhost:8000/mcp/
+```
+
+| Tool | What it does |
+|---|---|
+| `log_work` | Push entries into the daily grid — auto-enriched by the local LLM |
+| `get_week_context` | Read declared P0/P1/P2 priorities + career profile |
+| `get_week_summary` | Read the week's entries and synthesis |
+| `generate_synthesis` | Trigger "What Landed / What Drifted" + evidence bullets |
+
+Example: at the end of a Claude Code session, say *"push today's work to SignalForge"* — entries land tagged `mcp`, impact-framed, and signal-classified.
+
 ## Project structure
 
 ```
 signalforge/
 ├── backend/
-│   ├── main.py                  # entry point
+│   ├── main.py                  # dev entry point
+│   ├── signalforge.spec         # PyInstaller spec (desktop sidecar build)
 │   └── src/signalforge/
 │       ├── main.py              # FastAPI app + all routes
+│       ├── mcp_server.py        # MCP server + tools
 │       ├── models.py            # SQLModel database models
 │       ├── database.py          # SQLite engine + session
 │       └── llm_client.py        # Ollama client + prompt templates
 ├── frontend/
-│   └── src/
-│       ├── App.tsx
-│       ├── api.ts               # typed API client
-│       ├── types.ts             # shared TypeScript types
-│       ├── constants.ts         # UI metadata (statuses, signals, dimensions)
-│       └── components/
-│           ├── WeekHeader.tsx
-│           ├── StaffDimensionsPanel.tsx
-│           ├── PriorityContextPanel.tsx
-│           ├── DailyGrid.tsx
-│           └── WeeklySynthesisPanel.tsx
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── api.ts               # typed API client
+│   │   ├── types.ts             # shared TypeScript types
+│   │   ├── constants.ts         # UI metadata (statuses, signals, dimensions)
+│   │   └── components/          # WeekHeader, DailyGrid, Onboarding, …
+│   └── src-tauri/               # Tauri shell (Rust) + sidecar config
+├── scripts/
+│   └── prepare-binaries.sh      # stage sidecar binaries for desktop builds
+├── CONTRIBUTING.md
 └── README.md
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Local-first is non-negotiable — PRs adding telemetry or default cloud calls won't be accepted.
+
+## License
+
+[MIT](LICENSE)
