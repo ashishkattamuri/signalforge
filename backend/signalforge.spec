@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 a = Analysis(
@@ -30,10 +32,6 @@ a = Analysis(
         'uvicorn.protocols.websockets.wsproto_impl',
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
-        'starlette',
-        'starlette.middleware',
-        'starlette.middleware.cors',
-        'fastapi',
         'sqlmodel',
         'sqlalchemy',
         'sqlalchemy.dialects.sqlite',
@@ -45,7 +43,7 @@ a = Analysis(
         'multiprocessing.util',
         'email.mime.multipart',
         'email.mime.text',
-    ],
+    ] + collect_submodules('fastapi') + collect_submodules('starlette'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

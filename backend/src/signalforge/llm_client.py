@@ -63,7 +63,7 @@ Task: "{task}"
 Reply with only the signal type word, nothing else."""
 
 REFLECTION_COACH = """\
-You are a Staff-level engineering coach. Given this task entry, generate one short, \
+You are an experienced engineering career coach. Given this task entry, generate one short, \
 specific follow-up question that would help the engineer capture the deeper impact or \
 context while it's still fresh. Ask about who was affected, what risk was reduced, \
 whether it unblocked someone, or why it mattered strategically.

@@ -21,10 +21,8 @@ cd "$ROOT_DIR/backend"
 uv run pyinstaller signalforge.spec --clean --noconfirm
 cd "$ROOT_DIR"
 
-# PyInstaller produces a directory — Tauri sidecar needs a single binary.
-# We wrap it in a launcher script that sets the right paths.
-BACKEND_DIR="backend/dist/signalforge-backend"
-BACKEND_BIN="$BACKEND_DIR/signalforge-backend"
+# PyInstaller --onefile produces a single binary directly in dist/
+BACKEND_BIN="backend/dist/signalforge-backend"
 
 if [ ! -f "$BACKEND_BIN" ]; then
   echo "✗ Backend binary not found at $BACKEND_BIN"

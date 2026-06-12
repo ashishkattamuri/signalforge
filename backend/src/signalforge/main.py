@@ -74,6 +74,25 @@ def _parse_bullets(text: str) -> list[str]:
     return [l for l in lines if len(l) > 20]
 
 
+def _career_context(session: Session) -> Optional[str]:
+    """Build a system-prompt snippet from the user's profile settings, if any."""
+    s = session.exec(select(AppSettings)).first()
+    if not s:
+        return None
+    parts = []
+    if s.current_level and s.target_level:
+        parts.append(f"The engineer is currently at {s.current_level} and targeting {s.target_level}.")
+    elif s.target_level:
+        parts.append(f"The engineer is targeting {s.target_level}.")
+    elif s.current_level:
+        parts.append(f"The engineer is currently at {s.current_level}.")
+    if s.org_context:
+        parts.append(f"Org/team context: {s.org_context}")
+    if not parts:
+        return None
+    return "Context about the engineer you are helping: " + " ".join(parts)
+
+
 def _enrich_entry_bg(entry_id: int) -> None:
     """Run LLM enrichment for a saved entry in a background thread."""
     with Session(_engine) as session:
@@ -83,9 +102,10 @@ def _enrich_entry_bg(entry_id: int) -> None:
         if not llm.is_available():
             return
         try:
-            enriched = llm.generate(build_prompt(IMPACT_EXTRACTION, task=entry.task))
+            ctx = _career_context(session)
+            enriched = llm.generate(build_prompt(IMPACT_EXTRACTION, task=entry.task), system=ctx)
             sig_raw = llm.generate(build_prompt(SIGNAL_CLASSIFICATION, task=entry.task)).lower().strip()
-            reflection = llm.generate(build_prompt(REFLECTION_COACH, task=entry.task))
+            reflection = llm.generate(build_prompt(REFLECTION_COACH, task=entry.task), system=ctx)
 
             entry.enriched_task = enriched
             entry.signal_type = SignalType(sig_raw) if sig_raw in SignalType.__members__ else None
@@ -109,6 +129,10 @@ def _enrich_entry_bg(entry_id: int) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    with Session(_engine) as session:
+        settings = session.exec(select(AppSettings)).first()
+        if settings and settings.selected_model:
+            llm.model = settings.selected_model
     yield
 
 
@@ -132,7 +156,7 @@ llm = LLMClient()
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "llm_available": llm.is_available()}
+    return {"status": "ok", "llm_available": llm.is_available(), "model": llm.model}
 
 
 # ── App Settings ─────────────────────────────────────────────────────────────
@@ -169,6 +193,8 @@ def update_settings(body: SettingsUpdate, session: Session = Depends(get_session
     session.add(settings)
     session.commit()
     session.refresh(settings)
+    if body.selected_model:
+        llm.model = settings.selected_model
     return settings
 
 
@@ -404,10 +430,12 @@ def generate_synthesis(week_id: int, session: Session = Depends(get_session)):
         f"  {p.level.value.upper()} ({p.category.value}): {p.text}" for p in priorities
     )
 
+    ctx = _career_context(session)
     synthesis_text = llm.generate(
-        build_prompt(WEEKLY_SYNTHESIS, entries=entries_text, priorities=priorities_text)
+        build_prompt(WEEKLY_SYNTHESIS, entries=entries_text, priorities=priorities_text),
+        system=ctx,
     )
-    bullets_text = llm.generate(build_prompt(EVIDENCE_BULLETS, entries=entries_text))
+    bullets_text = llm.generate(build_prompt(EVIDENCE_BULLETS, entries=entries_text), system=ctx)
 
     what_landed, what_drifted = _split_synthesis(synthesis_text)
 
